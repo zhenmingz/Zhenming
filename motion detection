@@ -1,0 +1,100 @@
+#include <iostream>
+#include "stdlib.h"
+#include "stdio.h"
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+
+#include "cv.h"
+#include "highgui.h"
+
+using namespace std;
+using namespace cv;
+
+int main(int argc, char* argv[])
+{
+    //create a new window
+    cvNamedWindow("Window", CV_WINDOW_AUTOSIZE);
+    //create a new moving capture object
+    CvCapture* input = cvCreateFileCapture( argv[1] );
+    //find the properties of the image
+    double fps = cvGetCaptureProperty(input, CV_CAP_PROP_FPS);
+    CvSize imgSize = cvSize((int)cvGetCaptureProperty(input, CV_CAP_PROP_FRAME_WIDTH), (int)cvGetCaptureProperty(input, CV_CAP_PROP_FRAME_HEIGHT));
+    //create the output video
+    CvVideoWriter* writer = cvCreateVideoWriter(argv[2], CV_FOURCC('M','J','P','G'), fps, imgSize);
+    //initialize the frame
+    IplImage* greyImage = cvCreateImage( imgSize, IPL_DEPTH_8U, 1);
+    IplImage* colourImage;
+    IplImage* movingAverage = cvCreateImage( imgSize, IPL_DEPTH_32F, 3);
+    IplImage* difference;
+    IplImage* temp;
+
+    //indicates whether this is the first time in the loop of frames
+    bool first = true;
+
+   //keep processing frames
+    for(;;)
+        {
+           //get a frame from input video
+           colourImage = cvQueryFrame(input);
+
+      	   //if there are no more frames, break
+           if( !colourImage )
+               {
+               break;
+               }
+	         //if this is the first time, initialize the images
+           if(first)
+               {
+               difference = cvCloneImage(colourImage);
+               temp = cvCloneImage(colourImage);
+               cvConvertScale(colourImage, movingAverage, 1.0, 0.0);
+               first = false;
+               }
+	         //else, making a running average of the motion
+           else
+               {
+               cvRunningAvg(colourImage, movingAverage, 0.020, NULL);
+               }
+	         //convert the scale of the moving average
+           cvConvertScale(movingAverage,temp, 1.0, 5.0);
+	         //minus the current frame from the moving average
+           cvAbsDiff(colourImage,temp,difference);
+ 	         //convert the image to grayscale
+           cvCvtColor(difference,greyImage,CV_RGB2GRAY);
+	         //convert the image to black and whilte
+           cvThreshold(greyImage, greyImage, 50, 255, CV_THRESH_BINARY);
+	         //dilate the erode to reduce noise
+           cvErode(greyImage, greyImage, 0, 3);
+           cvDilate(greyImage, greyImage, 0, 8);
+           //cvErode(greyImage, greyImage, 0, 20);
+	         //find the contours of the moving images in the frame
+           CvMemStorage* storage = cvCreateMemStorage(0);
+           //find and draw the contours
+           CvSeq* contour = 0;
+           cvFindContours( greyImage, storage, &contour, sizeof(CvContour), CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE );
+           if(contour)
+           {
+              cvDrawContours(colourImage, contour, cvScalar(0,0,255), cvScalarAll(255), 100, 2);
+           }
+	         //show the frame
+           cvShowImage("Window", colourImage);
+	         //wait for user to exit
+           char c = cvWaitKey(33);
+           //27 is the EXIT
+           if(c == 27) break;
+	         //write the frame to the ouput movie
+           cvWriteFrame(writer, colourImage);
+    }
+
+  //destroy images, movies and window
+  cvReleaseImage(&colourImage);
+  cvReleaseImage(&temp);
+  cvReleaseImage(&difference);
+  cvReleaseImage(&greyImage);
+  cvReleaseImage(&movingAverage);
+  cvDestroyWindow("My Window");
+  cvReleaseVideoWriter(&writer);
+  cvReleaseCapture(&input);
+  return 0;
+}
